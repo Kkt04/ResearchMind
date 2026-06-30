@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body { @apply bg-paper text-ink font-body antialiased; }
+  ::selection { @apply bg-graph-400 text-white; }
+}
+
+@layer utilities {
+  .graph-line {
+    background-image: radial-gradient(circle, #E5DFFF 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+  .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background: #E5DFFF; border-radius: 99px; }
+}
+
+@keyframes pulse-node {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+.pulse-node { animation: pulse-node 2s ease-in-out infinite; }
+
+@keyframes float-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.float-up { animation: float-up 0.4s ease-out forwards; }
