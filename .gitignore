@@ -10,6 +10,7 @@ error.log
 # Environment files
 .env
 .env.local
+.env.example
 
 # Frontend
 frontend/node_modules/
