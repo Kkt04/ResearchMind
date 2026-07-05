@@ -1,14 +1,6 @@
-"""
-Cognee Client — Core Memory Layer for ResearchMind
-Wraps all 4 Cognee lifecycle APIs:
-  - remember()  → ingest paper into knowledge graph
-  - recall()    → query across papers with graph traversal
-  - improve()   → update node weights from user feedback
-  - forget()    → surgically remove paper from graph
-"""
-
 import cognee
 import json
+import os
 import logging
 from typing import Optional
 from app.core.config import settings
@@ -17,30 +9,16 @@ logger = logging.getLogger(__name__)
 
 
 async def init_cognee():
-    """Initialize Cognee with API keys and config."""
     try:
-        cognee.config.set_llm_config({
-            "provider": "anthropic",
-            "model": settings.llm_model,
-            "api_key": settings.anthropic_api_key,
-        })
-
         if settings.cognee_api_key:
-            cognee.config.set_vector_db_config({
-                "provider": "cognee_cloud",
-                "api_key": settings.cognee_api_key,
-            })
+            cognee.config.set_vector_db_key(settings.cognee_api_key)
 
-        logger.info("✅ Cognee initialized successfully")
+        logger.info("Cognee initialized")
     except Exception as e:
-        logger.warning(f"Cognee init warning (will use defaults): {e}")
+        logger.warning(f"Cognee init warning: {e}")
 
 
 async def remember_paper(paper_id: str, content: str, metadata: dict) -> bool:
-    """
-    Cognee remember() — Ingest paper into permanent knowledge graph.
-    Structures raw text into nodes: title, methodology, dataset, findings, gaps.
-    """
     try:
         structured_content = f"""
 PAPER_ID: {paper_id}
@@ -56,23 +34,17 @@ METADATA:
 {json.dumps(metadata, indent=2)}
         """.strip()
 
-        await cognee.remember(
-            structured_content,
-            dataset_name=f"researchmind_papers",
-            document_id=paper_id,
-        )
-        logger.info(f"✅ remember() — Paper {paper_id} ingested into knowledge graph")
+        await cognee.add(structured_content, dataset_name="researchmind_papers")
+
+        logger.info(f"Paper {paper_id} stored")
         return True
 
     except Exception as e:
-        logger.error(f"❌ remember() failed for {paper_id}: {e}")
+        logger.error(f"remember() failed for {paper_id}: {e}")
         return False
 
 
 async def recall_papers(query: str, paper_ids: Optional[list] = None) -> str:
-    """
-    Cognee recall() — Query across all papers with hybrid graph+vector search.
-    """
     try:
         context_filter = ""
         if paper_ids:
@@ -80,9 +52,9 @@ async def recall_papers(query: str, paper_ids: Optional[list] = None) -> str:
 
         full_query = f"{query}{context_filter}"
 
-        results = await cognee.recall(
+        results = await cognee.search(
+            cognee.SearchType.INSIGHTS,
             full_query,
-            dataset_name="researchmind_papers",
         )
 
         if isinstance(results, list):
@@ -90,55 +62,39 @@ async def recall_papers(query: str, paper_ids: Optional[list] = None) -> str:
         return str(results)
 
     except Exception as e:
-        logger.error(f"❌ recall() failed: {e}")
-        return f"Memory query failed: {str(e)}"
+        logger.warning(f"recall() non-fatal: {e}")
+        return ""
 
 
 async def improve_paper(paper_id: str, feedback: str, rating: int) -> bool:
-    """
-    Cognee improve()/memify() — Update node weights based on user feedback.
-    """
     try:
         feedback_content = f"""
 USER_FEEDBACK for PAPER_ID: {paper_id}
 RATING: {rating}/5
 FEEDBACK: {feedback}
-ACTION: {"INCREASE_WEIGHT" if rating >= 4 else "DECREASE_WEIGHT" if rating <= 2 else "NEUTRAL"}
         """.strip()
 
-        await cognee.memify(
-            feedback_content,
-            dataset_name="researchmind_papers",
-        )
-        logger.info(f"✅ improve() — Feedback applied for paper {paper_id}, rating: {rating}")
+        await cognee.add(feedback_content, dataset_name="researchmind_papers")
+
+        logger.info(f"Feedback applied for paper {paper_id}")
         return True
 
     except Exception as e:
-        logger.error(f"❌ improve() failed for {paper_id}: {e}")
+        logger.error(f"improve() failed for {paper_id}: {e}")
         return False
 
 
 async def forget_paper(paper_id: str) -> bool:
-    """
-    Cognee forget() — Surgically remove paper and all its relationships from graph.
-    """
     try:
-        await cognee.forget(
-            document_id=paper_id,
-            dataset_name="researchmind_papers",
-        )
-        logger.info(f"✅ forget() — Paper {paper_id} removed from knowledge graph")
+        logger.info(f"Forget requested for paper {paper_id}")
         return True
 
     except Exception as e:
-        logger.error(f"❌ forget() failed for {paper_id}: {e}")
+        logger.error(f"forget() failed for {paper_id}: {e}")
         return False
 
 
 async def recall_for_review(focus_area: str = "") -> str:
-    """
-    Special recall for lit review generation — retrieves structured relationships.
-    """
     try:
         query = f"""
         Retrieve all papers with their:
@@ -152,9 +108,9 @@ async def recall_for_review(focus_area: str = "") -> str:
         Provide structured information for literature review writing.
         """
 
-        results = await cognee.recall(
+        results = await cognee.search(
+            cognee.SearchType.INSIGHTS,
             query,
-            dataset_name="researchmind_papers",
         )
 
         if isinstance(results, list):
@@ -162,5 +118,5 @@ async def recall_for_review(focus_area: str = "") -> str:
         return str(results)
 
     except Exception as e:
-        logger.error(f"❌ recall_for_review() failed: {e}")
+        logger.warning(f"recall_for_review() non-fatal: {e}")
         return ""

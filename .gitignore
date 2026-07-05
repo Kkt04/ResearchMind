@@ -6,6 +6,7 @@ __pycache__/
 *.pyo
 *.db
 error.log
+papers_db.json
 
 # Environment files
 .env

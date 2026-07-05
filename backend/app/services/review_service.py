@@ -3,7 +3,7 @@ Review Service — Generates structured literature review drafts.
 """
 
 import logging
-import anthropic
+from openai import OpenAI
 from datetime import datetime
 from typing import Optional, List
 from app.core.config import settings
@@ -45,7 +45,7 @@ async def generate_literature_review(
         if paper_ids:
             relevant_papers = [p for p in all_papers if p["id"] in paper_ids]
         else:
-            relevant_papers = [p for p in all_papers if p.get("status") == "ready"]
+            relevant_papers = [p for p in all_papers if p.get("status") != "failed"]
 
         if not relevant_papers:
             return {
@@ -112,7 +112,10 @@ async def _generate_review_sections(
     paper_count: int,
 ) -> list:
     try:
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        client = OpenAI(
+            api_key=settings.groq_api_key,
+            base_url="https://api.groq.com/openai/v1",
+        )
 
         focus_note = f"\nFocus Area: {focus_area}" if focus_area else ""
         user_prompt = f"""Generate a comprehensive literature review titled: "{title}"
@@ -136,20 +139,22 @@ Format your response as:
 
 Make each section substantive and academically rigorous."""
 
-        response = client.messages.create(
+        response = client.chat.completions.create(
             model=settings.llm_model,
             max_tokens=4000,
-            system=REVIEW_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_prompt}]
+            messages=[
+                {"role": "system", "content": REVIEW_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
         )
 
-        raw_text = response.content[0].text
+        raw_text = response.choices[0].message.content
         sections = _parse_sections(raw_text)
 
         return sections
 
     except Exception as e:
-        logger.error(f"Claude review generation failed: {e}")
+        logger.error(f"LLM review generation failed: {e}")
         return _fallback_review(papers_summary)
 
 

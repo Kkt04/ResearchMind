@@ -4,6 +4,8 @@ Extracts text, metadata, and feeds into Cognee memory graph.
 """
 
 import uuid
+import json
+import os
 import logging
 import httpx
 import re
@@ -23,7 +25,30 @@ from app.models.schemas import PaperSource
 
 logger = logging.getLogger(__name__)
 
-papers_db: dict = {}
+PAPERS_DB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "papers_db.json")
+
+
+def _load_papers_db() -> dict:
+    if os.path.exists(PAPERS_DB_PATH):
+        try:
+            with open(PAPERS_DB_PATH) as f:
+                data = json.load(f)
+                logger.info(f"Loaded {len(data)} papers from {PAPERS_DB_PATH}")
+                return data
+        except Exception as e:
+            logger.warning(f"Failed to load papers DB: {e}")
+    return {}
+
+
+def _save_papers_db(db: dict):
+    try:
+        with open(PAPERS_DB_PATH, "w") as f:
+            json.dump(db, f, indent=2, default=str)
+    except Exception as e:
+        logger.warning(f"Failed to save papers DB: {e}")
+
+
+papers_db: dict = _load_papers_db()
 
 
 async def extract_arxiv_paper(arxiv_id: str) -> Tuple[str, dict]:
@@ -86,8 +111,11 @@ async def extract_pdf_content(file_bytes: bytes) -> str:
 
 async def extract_metadata_from_text(title: str, content: str) -> dict:
     try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        from openai import OpenAI
+        client = OpenAI(
+            api_key=settings.groq_api_key,
+            base_url="https://api.groq.com/openai/v1",
+        )
 
         prompt = f"""Analyze this research paper and extract structured metadata.
 Return a JSON object with these fields (use null if not found):
@@ -107,14 +135,14 @@ Paper content (first 3000 chars):
 
 Return ONLY valid JSON, no explanation."""
 
-        response = client.messages.create(
+        response = client.chat.completions.create(
             model=settings.llm_model,
             max_tokens=1000,
             messages=[{"role": "user", "content": prompt}]
         )
 
         import json
-        text = response.content[0].text.strip()
+        text = response.choices[0].message.content.strip()
         text = re.sub(r'```json\s*|\s*```', '', text).strip()
         return json.loads(text)
 
@@ -195,6 +223,7 @@ async def ingest_paper(
         }
 
         papers_db[paper_id] = paper_record
+        _save_papers_db(papers_db)
         logger.info(f"✅ Paper ingested: {paper_record['title']} [{paper_id}]")
         return paper_record
 
@@ -209,6 +238,7 @@ async def ingest_paper(
             "created_at": datetime.now().isoformat(),
         }
         papers_db[paper_id] = paper_record
+        _save_papers_db(papers_db)
         return paper_record
 
 
@@ -223,6 +253,7 @@ def get_paper_by_id(paper_id: str) -> Optional[dict]:
 def delete_paper_record(paper_id: str) -> bool:
     if paper_id in papers_db:
         del papers_db[paper_id]
+        _save_papers_db(papers_db)
         return True
     return False
 
@@ -232,5 +263,6 @@ def update_paper_rating(paper_id: str, rating: int, feedback: str) -> bool:
         papers_db[paper_id]["rating"] = rating
         papers_db[paper_id]["feedback"] = feedback
         papers_db[paper_id]["updated_at"] = datetime.now().isoformat()
+        _save_papers_db(papers_db)
         return True
     return False

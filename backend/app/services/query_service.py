@@ -3,7 +3,7 @@ Query Service — Routes queries through Cognee recall() and enriches with Claud
 """
 
 import logging
-import anthropic
+from openai import OpenAI
 from typing import Optional, List
 from app.core.config import settings
 from app.core.cognee_client import recall_papers
@@ -109,7 +109,10 @@ Rating: {p.get('rating', 'Unrated')}/5
 
 async def _synthesize_with_claude(query: str, context: str, mode: str) -> str:
     try:
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        client = OpenAI(
+            api_key=settings.groq_api_key,
+            base_url="https://api.groq.com/openai/v1",
+        )
 
         mode_instructions = {
             "gaps": "Focus specifically on research gaps, limitations, and opportunities for future work.",
@@ -128,17 +131,19 @@ Retrieved Memory Context:
 
 Please provide a thorough, well-structured answer citing specific papers where relevant."""
 
-        response = client.messages.create(
+        response = client.chat.completions.create(
             model=settings.llm_model,
             max_tokens=1500,
-            system=QUERY_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_prompt}]
+            messages=[
+                {"role": "system", "content": QUERY_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
         )
 
-        return response.content[0].text
+        return response.choices[0].message.content
 
     except Exception as e:
-        logger.error(f"Claude synthesis failed: {e}")
+        logger.error(f"LLM synthesis failed: {e}")
         return f"Based on your research collection:\n\n{context[:2000]}"
 
 
@@ -154,7 +159,10 @@ async def chat_with_memory(message: str, history: list) -> dict:
         memory_context = await recall_papers(message)
         papers_context = _build_papers_context()
 
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        client = OpenAI(
+            api_key=settings.groq_api_key,
+            base_url="https://api.groq.com/openai/v1",
+        )
 
         system = f"""{QUERY_SYSTEM_PROMPT}
 
@@ -167,18 +175,18 @@ Paper Collection Summary:
         messages = []
         for msg in history[-10:]:
             messages.append({"role": msg["role"], "content": msg["content"]})
+        messages.insert(0, {"role": "system", "content": system})
         messages.append({"role": "user", "content": message})
 
-        response = client.messages.create(
+        response = client.chat.completions.create(
             model=settings.llm_model,
             max_tokens=1000,
-            system=system,
             messages=messages,
         )
 
         sources = _extract_sources()
         return {
-            "response": response.content[0].text,
+            "response": response.choices[0].message.content,
             "sources_used": sources[:5],
         }
 
